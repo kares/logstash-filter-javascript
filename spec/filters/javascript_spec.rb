@@ -37,6 +37,38 @@ describe LogStash::Filters::Javascript do
       end
     end
 
+    describe "returning new event" do
+      let(:options) { { 'code' => "return event.clone()" } }
+      before(:each) { plugin.register }
+
+      it "proceeds with new event and cancels old" do
+        events = plugin.multi_filter [ event ]
+        expect( events.length ).to eq 2
+        expect( event.cancelled? ).to be true
+      end
+    end
+
+    describe "returning same event" do
+      let(:options) { { 'code' => "return event" } }
+      before(:each) { plugin.register }
+
+      it "does not cancel event" do
+        events = plugin.multi_filter [ event ]
+        expect( events.length ).to eq 1
+        expect( events[0] ).to equal(event)
+        expect( event.cancelled? ).to be false
+      end
+    end
+
+    describe "returning multiple events" do
+      let(:options) { { 'code' => "return [event.clone(), event.clone(), event.clone()]" } }
+      before(:each) { plugin.register }
+
+      it "produces more events" do
+        expect { |block| plugin.filter(event, &block) }.to yield_control.exactly(3).times
+      end
+    end
+
     # describe "catch all JS exceptions" do
     #   config <<-CONFIG
     #     filter {
@@ -62,9 +94,9 @@ describe LogStash::Filters::Javascript do
                 :javascript_line => 1 + 1, :javascript_column => 10)
             ) #.and_call_original
 
-        new_events = plugin.multi_filter [ event ]
-        expect(new_events.length).to eq 1
-        expect(new_events[0]).to equal(event)
+        events = plugin.multi_filter [ event ]
+        expect( events.length ).to eq 1
+        expect( events[0] ).to equal(event)
         expect( event.get('tags') ).to eql ["_javascriptexception"]
       end
     end

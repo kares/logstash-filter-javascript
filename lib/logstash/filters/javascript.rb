@@ -12,9 +12,9 @@ require "logstash/namespace"
 #         code => "if (java.lang.Math.random() <= 0.9) event.cancel()"
 #       }
 #     }
-#
-class LogStash::Filters::Javascript < LogStash::Filters::Base
+module LogStash module Filters class Javascript < Base
 
+  java_import 'java.util.Map'
   java_import 'jdk.nashorn.api.scripting.NashornException'
   java_import 'jdk.nashorn.api.scripting.ScriptObjectMirror'
   JEvent = org.logstash.Event
@@ -85,32 +85,43 @@ class LogStash::Filters::Javascript < LogStash::Filters::Base
 
   # @param results (JS array) in a `jdk.nashorn.api.scripting.ScriptObjectMirror`
   def filter_results(event, js_return)
-    returned_original = false
     if js_return.nil? # explicit `return null`
-      # drop event (returned_original = false)
+      # drop event (return false)
+    elsif ScriptObjectMirror.isUndefined(js_return) # jdk.nashorn.internal.runtime.Undefined
+      return true # do not drop (assume it's been dealt with e.g. `event.cancel()`)
     elsif js_return.is_a?(ScriptObjectMirror)
       if js_return.isArray
-        i = 0
+        i = 0; returned_original = false
         while i < js_return.size
           evt = js_return.getSlot(i)
-          if event.equal? evt
+          if event.equal?(evt)
             returned_original = true
           else
-            yield wrap_event(evt) # JS code is expected to work with Java event API
+            yield wrap_event(evt)
           end
           i += 1
         end
-      elsif 'Undefined'.eql?(js_return.getClassName) # jdk.nashorn.internal.runtime.Undefined
-        returned_original = true # do not drop (assume it's been dealt with e.g. `event.cancel()`)
+        return returned_original
       else
-        raise ScriptError, "javascript did not return an event array (or null) from 'filter', got: #{js_return.getClassName}"
+        begin
+          evt = wrap_event(js_return) # JSObject implement Map interface
+        rescue => e
+          raise e # TODO we should attempt to provide a better exception here if we can not convert the JS (map) object
+          # raise ScriptError, "javascript did not return an event/array (or null) from 'filter', got: #{js_return.getClassName}"
+        else
+          yield evt
+        end
       end
+    elsif js_return.is_a?(JEvent) || js_return.is_a?(Map)
+      return true if event.equal?(js_return)
+      yield wrap_event(js_return)
     else
-      raise ScriptError, "javascript did not return an event array (or null) from 'filter', got: #{js_return.inspect}"
+      raise ScriptError, "javascript did not return an event/array (or null) from 'filter', got: #{js_return.inspect}"
     end
-    returned_original
+    false # script did not return original event
   end
 
+  # NOTE: JS code is expected to work with Java event API
   # @param js_event a org.logstash.Event or simply a plain-old (map-like) JS object
   def wrap_event(js_event)
     js_event = JEvent.new(js_event) unless js_event.is_a?(JEvent)
@@ -195,4 +206,4 @@ class LogStash::Filters::Javascript < LogStash::Filters::Base
 
   end
 
-end
+end end end
