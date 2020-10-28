@@ -9,6 +9,10 @@ describe LogStash::Filters::Javascript do
     LogStash::Event.new "message" => "hello javascript"
   end
 
+  subject(:plugin) { ::LogStash::Filters::Javascript.new(options) }
+
+  let(:options) { fail 'let(:options) needs to be defined' }
+
   context "inline (code) script" do
 
     describe "using Java event API" do
@@ -48,17 +52,17 @@ describe LogStash::Filters::Javascript do
     # end
 
     describe "throwing error" do
-      subject(:filter) { ::LogStash::Filters::Javascript.new('code' => "if (true) throw new Error('a message')") }
-      before(:each) { filter.register }
+      let(:options) { { 'code' => "if (true) throw new Error('a message')" } }
+      before(:each) { plugin.register }
 
-      it "should handle (standard) Error" do
-        expect( filter.logger ).to receive(:error).
+      it "handles Error" do
+        expect( plugin.logger ).to receive(:error).
             with('could not process event due:', hash_including(
                 :javascript_error => 'Error: a message',
                 :javascript_line => 1 + 1, :javascript_column => 10)
             ) #.and_call_original
 
-        new_events = filter.multi_filter([event])
+        new_events = plugin.multi_filter [ event ]
         expect(new_events.length).to eq 1
         expect(new_events[0]).to equal(event)
         expect( event.get('tags') ).to eql ["_javascriptexception"]
@@ -66,33 +70,45 @@ describe LogStash::Filters::Javascript do
     end
 
     describe "throwing object" do
-      subject(:filter) { ::LogStash::Filters::Javascript.new('code' => "\n throw 42") }
-      before(:each) { filter.register }
+      let(:options) { { 'code' => "\n throw 42" } }
+      before(:each) { plugin.register }
 
-      it "should handle (standard) error" do
-        expect( filter.logger ).to receive(:error).
+      it "handles (javascript) error" do
+        expect( plugin.logger ).to receive(:error).
             with('could not process event due:', hash_including(
                 :javascript_error => 42,
                 :javascript_line => 2 + 1, :javascript_column => 1)
             ) #.and_call_original
 
-        new_events = filter.multi_filter([event])
+        new_events = plugin.multi_filter [ event ]
         expect(new_events.length).to eq 1
         expect(new_events[0]).to equal(event)
         expect( event.get('tags') ).to eql ["_javascriptexception"]
       end
     end
 
+    describe "unexpected return value" do
+      let(:options) { { 'code' => "if (true) return false" } }
+
+      it "raises script error" do
+        plugin.register
+        expect { plugin.multi_filter [ event ] }.to raise_error(LogStash::Filters::Javascript::ScriptError)
+      end
+    end
+
     describe "invalid script" do
-      subject(:filter) { ::LogStash::Filters::Javascript.new('code' => "if (true) { 'okay' }\nif (false) invalid syntax {;") }
+      let(:options) { { 'code' => "if (true) { 'okay' }\nif (false) invalid syntax {;" } }
+      before(:each) do
+        expect( plugin.logger ).to receive(:error)
+      end
 
       it "should error out during register" do
-        expect { filter.register }.to raise_error(Java::JavaxScript::ScriptException)
+        expect { plugin.register }.to raise_error(Java::JavaxScript::ScriptException)
       end
 
       it "reports correct error line" do
         begin
-          filter.register
+          plugin.register
           fail('syntax error expected')
         rescue Java::JavaxScript::ScriptException => e
           expect( e.cause.message ).to include "Expected ; but found syntax\nif (false) invalid syntax {;"

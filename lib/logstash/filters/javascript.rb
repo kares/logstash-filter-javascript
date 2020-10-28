@@ -47,15 +47,16 @@ class LogStash::Filters::Javascript < LogStash::Filters::Base
     super(*params)
     @script = Script.new(nil, init_params, logger)
     @script.js_eval @init if @init
+    @js_filter = nil
   end
 
   def register
     if @code && @path.nil?
-      @handler = @script.js_eval(@code) { "(function filter(event) {\n#{@code} } )" }
+      @js_filter = @script.js_eval(@code) { "(function filter(event) {\n#{@code} } )" }
       # jdk.nashorn.api.scripting.JSObject
     elsif @path && @code.nil?
       @script.js_eval(@code, path: @path)
-      @handler = @script.get('filter') # `expecting a `function filter(event) {}`
+      @js_filter = @script.get('filter') # `expecting a `function filter(event) {}`
       raise ScriptError, "script at '#{@path}' does not define a filter(event) function" unless @handler
     else
       msg = "You must either use an inline script with the \"code\" option or a script file using \"path\"."
@@ -69,7 +70,7 @@ class LogStash::Filters::Javascript < LogStash::Filters::Base
   def filter(event, &block)
     java_event = event.to_java
     begin
-      results = @script.js_run @handler, java_event
+      js_return = @js_filter.call(@script.context, java_event)
       filter_matched(event)
     rescue => e
       @logger.error("could not process event due:", error_details(e))
@@ -77,31 +78,35 @@ class LogStash::Filters::Javascript < LogStash::Filters::Base
       tag_exception(event, e)
       return event
     end
-    event.cancel unless filter_results(java_event, results, &block)
+    event.cancel unless filter_results(java_event, js_return, &block)
   end
 
   private
 
   # @param results (JS array) in a `jdk.nashorn.api.scripting.ScriptObjectMirror`
-  def filter_results(event, results)
+  def filter_results(event, js_return)
     returned_original = false
-    if results.nil? # explicit `return null`
+    if js_return.nil? # explicit `return null`
       # drop event (returned_original = false)
-    elsif 'Undefined'.eql?(results.getClassName) # jdk.nashorn.internal.runtime.Undefined
-      returned_original = true # do not drop (assume it's been dealt with e.g. `event.cancel()`)
-    elsif results.isArray
-      i = 0
-      while i < results.size
-        evt = results.getSlot(i)
-        if event.equal? evt
-          returned_original = true
-        else
-          yield wrap_event(evt) # JS code is expected to work with Java event API
+    elsif js_return.is_a?(ScriptObjectMirror)
+      if js_return.isArray
+        i = 0
+        while i < js_return.size
+          evt = js_return.getSlot(i)
+          if event.equal? evt
+            returned_original = true
+          else
+            yield wrap_event(evt) # JS code is expected to work with Java event API
+          end
+          i += 1
         end
-        i += 1
+      elsif 'Undefined'.eql?(js_return.getClassName) # jdk.nashorn.internal.runtime.Undefined
+        returned_original = true # do not drop (assume it's been dealt with e.g. `event.cancel()`)
+      else
+        raise ScriptError, "javascript did not return an event array (or null) from 'filter', got: #{js_return.getClassName}"
       end
     else
-      raise ScriptError, "script did not return an array (or null) from 'filter', got #{results.getClassName}"
+      raise ScriptError, "javascript did not return an event array (or null) from 'filter', got: #{js_return.inspect}"
     end
     returned_original
   end
@@ -139,6 +144,8 @@ class LogStash::Filters::Javascript < LogStash::Filters::Base
 
   class Script
 
+    attr_reader :context
+
     # @param context the JS this context for the filter function
     # @param params additional JS (key-value) parameters to set 'globally'
     def initialize(context, params, logger)
@@ -170,14 +177,6 @@ class LogStash::Filters::Javascript < LogStash::Filters::Base
       true # NOTE can we do more JS code checks?
     end
 
-    def js_run(callable, event)
-      callable.call(@context, event)
-    # rescue NashornException => e
-    #   raise e
-    # rescue => e
-    #   raise e
-    end
-
     private
 
     MAX_LINE_LENGTH = 50
@@ -194,13 +193,6 @@ class LogStash::Filters::Javascript < LogStash::Filters::Base
       { code: code }
     end
 
-    # def test
-    #   results = @context.execute_tests
-    #   logger.info("Test run complete", :path => path, :results => results)
-    #   if results[:failed] > 0 || results[:errored] > 0
-    #     raise ScriptError.new("Script '#{path}' had #{results[:failed] + results[:errored]} failing tests! Check the error log for details.")
-    #   end
-    # end
   end
 
 end
