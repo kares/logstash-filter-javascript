@@ -182,9 +182,9 @@ describe LogStash::Filters::Javascript do
       end
     end
 
-    describe "init params" do
+    describe "init parameters" do
       let(:options) { {
-          'init_params' => { 'env' => 'debug', 'fieldName' => 'x', 'multiplier' => 10 },
+          'init_parameters' => { 'env' => 'debug', 'fieldName' => 'x', 'multiplier' => 10 },
           'path' => "spec/fixtures/field_multiplier.js"
       } }
 
@@ -196,35 +196,5 @@ describe LogStash::Filters::Javascript do
       end
     end
 
-    # describe "with new event block" do
-    #   subject(:filter) { ::LogStash::Filters::Javascript.new('code' => 'new_event_block.call(event.clone)') }
-    #   before(:each) { filter.register }
-    #
-    #   it "creates new event" do
-    #     event = LogStash::Event.new "message" => "hello world", "mydate" => "2014-09-23T00:00:00-0800"
-    #     new_events = filter.multi_filter([event])
-    #     expect(new_events.length).to eq 2
-    #     expect(new_events[0]).to equal(event)
-    #     expect(new_events[1]).not_to eq(event)
-    #     expect(new_events[1].to_hash).to eq(event.to_hash)
-    #   end
-    # end
-
-    # describe "allow to replace event by another one" do
-    #   config <<-CONFIG
-    #     filter {
-    #       ruby {
-    #         code => "new_event_block.call(event.clone);
-    #                  event.cancel;"
-    #         add_tag => ["ok"]
-    #       }
-    #     }
-    #   CONFIG
-    #
-    #   sample("message" => "hello world", "mydate" => "2014-09-23T00:00:00-0800") do
-    #     expect(subject.get("message")).to eq("hello world");
-    #     expect(subject.get("mydate")).to eq("2014-09-23T00:00:00-0800");
-    #   end
-    # end
   end
 end

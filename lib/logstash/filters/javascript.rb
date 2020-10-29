@@ -27,8 +27,8 @@ module LogStash module Filters class Javascript < Base
   # Any code to execute at plugin startup-time
   config :init, :validate => :string
 
-  # Parameters for this specific script, set on global scope
-  config :init_params, :type => :hash, :default => {}
+  # Parameters for this specific script, these are set as globals.
+  config :init_parameters, :type => :hash, :default => {}
 
   # The code to execute for every event.
   # You will have an `event` variable available that is the event itself.
@@ -45,7 +45,7 @@ module LogStash module Filters class Javascript < Base
 
   def initialize(*params)
     super(*params)
-    @script = Script.new(nil, init_params, logger)
+    @script = Script.new(nil, init_parameters, logger)
     @script.js_eval @init if @init
     @js_filter = nil
   end
