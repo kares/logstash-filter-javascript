@@ -112,9 +112,9 @@ describe LogStash::Filters::Javascript do
                 :javascript_line => 2 + 1, :javascript_column => 1)
             ) #.and_call_original
 
-        new_events = plugin.multi_filter [ event ]
-        expect(new_events.length).to eq 1
-        expect(new_events[0]).to equal(event)
+        events = plugin.multi_filter [ event ]
+        expect( events.length ).to eq 1
+        expect( events[0] ).to equal(event)
         expect( event.get('tags') ).to eql ["_javascriptexception"]
       end
     end
@@ -145,6 +145,30 @@ describe LogStash::Filters::Javascript do
         rescue Java::JavaxScript::ScriptException => e
           expect( e.cause.message ).to include "Expected ; but found syntax\nif (false) invalid syntax {;"
         end
+      end
+    end
+
+    context "path option" do
+      let(:options) { { 'path' => "spec/fixtures/throwIfErrorFieldSet.js" } }
+      before(:each) { plugin.register }
+
+      it "works normally (wout return)" do
+        plugin.multi_filter [ event ]
+        expect( event.get('filtered') ).to be true
+      end
+
+      it "raises error" do
+        event.set('error', 'FROM SPEC')
+        plugin.multi_filter [ event ]
+        expect( event.get('tags') ).to eql ["_javascriptexception"]
+      end
+    end
+
+    context "non-readable path option" do
+      let(:options) { { 'path' => "__INVALID__.js" } }
+
+      it "raises configuration error" do
+        expect { plugin.register }.to raise_error(LogStash::ConfigurationError)
       end
     end
 

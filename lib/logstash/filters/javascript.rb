@@ -55,9 +55,16 @@ module LogStash module Filters class Javascript < Base
       @js_filter = @script.js_eval(@code) { "(function filter(event) {\n#{@code} } )" }
       # jdk.nashorn.api.scripting.JSObject
     elsif @path && @code.nil?
-      @script.js_eval(@code, path: @path)
+      @script.js_eval(::File.read(@path), path: @path)
       @js_filter = @script.get('filter') # `expecting a `function filter(event) {}`
-      raise ScriptError, "script at '#{@path}' does not define a filter(event) function" unless @handler
+      raise ScriptError, "script at '#{@path}' does not define a filter(event) function" if @js_filter.nil?
+      if @js_filter.is_a?(ScriptObjectMirror)
+        unless @js_filter.isFunction
+          raise ScriptError, "script at '#{@path}' defines a 'filter' property that isn't a function (got type: #{@js_filter.getClassName})"
+        end
+      else
+        raise ScriptError, "script at '#{@path}' defines a 'filter' property that isn't a function (got value: #{@js_filter.inspect})"
+      end
     else
       msg = "You must either use an inline script with the \"code\" option or a script file using \"path\"."
       @logger.error(msg)
@@ -74,7 +81,6 @@ module LogStash module Filters class Javascript < Base
       filter_matched(event)
     rescue => e
       @logger.error("could not process event due:", error_details(e))
-      #puts "\n  #{e.backtrace.join("\n  ")}" #if $VERBOSE
       tag_exception(event, e)
       return event
     end
@@ -155,6 +161,9 @@ module LogStash module Filters class Javascript < Base
 
   class Script
 
+    FILENAME = javax.script.ScriptEngine::FILENAME
+    ENGINE_SCOPE = javax.script.ScriptContext::ENGINE_SCOPE
+
     attr_reader :context
 
     # @param context the JS this context for the filter function
@@ -168,20 +177,24 @@ module LogStash module Filters class Javascript < Base
       logger.debug "initialized javascript (#{factory.getLanguageVersion}) engine:", name: factory.getEngineName, version: factory.getEngineVersion
 
       context = @engine.getContext
-      params.each { |name, value| context.setAttribute name, value, javax.script.ScriptContext::ENGINE_SCOPE }
+      params.each { |name, value| context.setAttribute name, value, ENGINE_SCOPE }
     end
 
     def js_eval(code, path: nil)
+      filename = @engine.get(FILENAME)
+      @engine.put(FILENAME, path)
       @engine.eval block_given? ? yield : code
     rescue => e # (non-checked) Java::JavaxScript::ScriptException, e.g.
       # Java::JavaxScript::ScriptException (TypeError: Cannot read property "far" from undefined in <eval> at line number 2)
       @logger.error "failed to evaluate javascript code:", code_hint(code, path).merge(message: e.message)
       raise e
+    ensure
+      @engine.put(FILENAME, filename)
     end
 
     # @return nil if no such property
     def get(name)
-      @engine.getContext.getAttribute(name)
+      @engine.eval(name)
     end
 
     def verify
