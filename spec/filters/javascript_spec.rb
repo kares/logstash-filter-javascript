@@ -172,6 +172,30 @@ describe LogStash::Filters::Javascript do
       end
     end
 
+    describe "init script" do
+      let(:options) { { 'init' => 'var foo = "bar"', 'code' => "event.setField('foo', foo)" } }
+
+      it "sets a variable in 'global' scope" do
+        plugin.register
+        plugin.multi_filter [ event ]
+        expect( event.get('foo') ).to eql 'bar'
+      end
+    end
+
+    describe "init params" do
+      let(:options) { {
+          'init_params' => { 'env' => 'debug', 'fieldName' => 'x', 'multiplier' => 10 },
+          'path' => "spec/fixtures/field_multiplier.js"
+      } }
+
+      it "calculates x * multiplier" do
+        plugin.register
+        event.set('x', 4.2)
+        plugin.multi_filter [ event ]
+        expect( event.get('x') ).to eql 42.0
+      end
+    end
+
     # describe "with new event block" do
     #   subject(:filter) { ::LogStash::Filters::Javascript.new('code' => 'new_event_block.call(event.clone)') }
     #   before(:each) { filter.register }

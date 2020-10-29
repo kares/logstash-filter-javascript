@@ -27,15 +27,15 @@ module LogStash module Filters class Javascript < Base
   # Any code to execute at plugin startup-time
   config :init, :validate => :string
 
+  # Parameters for this specific script, set on global scope
+  config :init_params, :type => :hash, :default => {}
+
   # The code to execute for every event.
   # You will have an `event` variable available that is the event itself.
   config :code, :validate => :string
 
   # Path to the script.js
   config :path, :validate => :path
-
-  # Parameters for this specific script
-  config :init_params, :type => :hash, :default => {} # TODO set these on this vs custom bindings?
 
   # Tag to add to events that cause an exception in the script filter
   config :tag_on_exception, :type => :string, :default => "_javascriptexception"
@@ -77,7 +77,7 @@ module LogStash module Filters class Javascript < Base
   def filter(event, &block)
     java_event = event.to_java
     begin
-      js_return = @js_filter.call(@script.context, java_event)
+      js_return = @script.js_call(@js_filter, java_event)
       filter_matched(event)
     rescue => e
       @logger.error("could not process event due:", error_details(e))
@@ -162,7 +162,6 @@ module LogStash module Filters class Javascript < Base
   class Script
 
     FILENAME = javax.script.ScriptEngine::FILENAME
-    ENGINE_SCOPE = javax.script.ScriptContext::ENGINE_SCOPE
 
     attr_reader :context
 
@@ -176,8 +175,7 @@ module LogStash module Filters class Javascript < Base
       factory = @engine.getFactory
       logger.debug "initialized javascript (#{factory.getLanguageVersion}) engine:", name: factory.getEngineName, version: factory.getEngineVersion
 
-      context = @engine.getContext
-      params.each { |name, value| context.setAttribute name, value, ENGINE_SCOPE }
+      params.each { |name, value| @engine.put(name, value) }
     end
 
     def js_eval(code, path: nil)
@@ -190,6 +188,10 @@ module LogStash module Filters class Javascript < Base
       raise e
     ensure
       @engine.put(FILENAME, filename)
+    end
+
+    def js_call(js_fn, arg)
+      js_fn.call(@context, arg)
     end
 
     # @return nil if no such property
