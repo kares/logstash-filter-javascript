@@ -35,7 +35,7 @@ module LogStash module Filters class Javascript < Base
   config :code, :validate => :string
 
   # Path to the script.js
-  config :path, :validate => :path
+  config :path, :validate => :path, :list => true
 
   # Tag to add to events that cause an exception in the script filter
   config :tag_on_exception, :type => :string, :default => "_javascriptexception"
@@ -51,24 +51,31 @@ module LogStash module Filters class Javascript < Base
   end
 
   def register
-    if @code && @path.nil?
-      @js_filter = @script.js_eval(@code) { "(function filter(event) {\n#{@code} } )" }
-      # jdk.nashorn.api.scripting.JSObject
-    elsif @path && @code.nil?
-      @script.js_eval(::File.read(@path), path: @path)
+    @js_filter = nil # TODO: devutils' sample helper causes plugin.register to happen twice
+
+    if @path
+      @path.each { |path| @script.js_eval(::File.read(path), path: path) }
       @js_filter = @script.get('filter') # `expecting a `function filter(event) {}`
-      raise ScriptError, "script at '#{@path}' does not define a filter(event) function" if @js_filter.nil?
-      if @js_filter.is_a?(ScriptObjectMirror)
-        unless @js_filter.isFunction
-          raise ScriptError, "script at '#{@path}' defines a 'filter' property that isn't a function (got type: #{@js_filter.getClassName})"
-        end
+      if @js_filter.nil?
+        raise ScriptError, "script at '#{@path}' does not define a filter(event) function" if @code.nil?
       else
-        raise ScriptError, "script at '#{@path}' defines a 'filter' property that isn't a function (got value: #{@js_filter.inspect})"
+        if @js_filter.is_a?(ScriptObjectMirror)
+          unless @js_filter.isFunction
+            raise ScriptError, "script at '#{@path}' defines a 'filter' property that isn't a function (got type: #{@js_filter.getClassName})"
+          end
+        else
+          raise ScriptError, "script at '#{@path}' defines a 'filter' property that isn't a function (got value: #{@js_filter.inspect})"
+        end
       end
-    else
-      msg = "You must either use an inline script with the \"code\" option or a script file using \"path\"."
-      @logger.error(msg)
-      raise LogStash::ConfigurationError, msg
+    end
+
+    if @code
+      if @js_filter
+        msg = "Script(s) provided by 'path' defined a filter function while 'code' => ... is also set, this is ambiguous!"
+        @logger.error(msg); raise LogStash::ConfigurationError.new(msg)
+      end
+
+      @js_filter = @script.js_eval(@code) { "(function filter(event) {\n#{@code} } )" } # jdk.nashorn.api.scripting.JSObject
     end
 
     @script.verify

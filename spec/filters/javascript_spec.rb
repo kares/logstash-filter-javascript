@@ -48,6 +48,21 @@ describe LogStash::Filters::Javascript do
       end
     end
 
+    describe "returning js object" do
+      let(:options) { { 'code' => 'return { foo: {}, message: event.getField("message") + "!" }' } }
+      before(:each) { plugin.register }
+
+      it "creates new event and cancels old" do
+        events = plugin.multi_filter [ event ]
+        expect( events.length ).to eq 2
+        expect( events[0] ).to be event
+        expect( event.cancelled? ).to be true
+
+        expect( events[1].get('message') ).to eql "hello javascript!"
+        expect( events[1].get('foo') ).to eql Hash.new
+      end
+    end
+
     describe "returning same event" do
       let(:options) { { 'code' => "return event" } }
       before(:each) { plugin.register }
@@ -148,53 +163,67 @@ describe LogStash::Filters::Javascript do
       end
     end
 
-    context "path option" do
-      let(:options) { { 'path' => "spec/fixtures/throwIfErrorFieldSet.js" } }
-      before(:each) { plugin.register }
+  end
 
-      it "works normally (wout return)" do
-        plugin.multi_filter [ event ]
-        expect( event.get('filtered') ).to be true
-      end
+  context "path option" do
+    let(:options) { { 'path' => "spec/fixtures/throwIfErrorFieldSet.js" } }
+    before(:each) { plugin.register }
 
-      it "raises error" do
-        event.set('error', 'FROM SPEC')
-        plugin.multi_filter [ event ]
-        expect( event.get('tags') ).to eql ["_javascriptexception"]
-      end
+    it "works normally (wout return)" do
+      plugin.multi_filter [ event ]
+      expect( event.get('filtered') ).to be true
     end
 
-    context "non-readable path option" do
-      let(:options) { { 'path' => "__INVALID__.js" } }
+    it "raises error" do
+      event.set('error', 'FROM SPEC')
+      plugin.multi_filter [ event ]
+      expect( event.get('tags') ).to eql ["_javascriptexception"]
+    end
+  end
 
-      it "raises configuration error" do
-        expect { plugin.register }.to raise_error(LogStash::ConfigurationError)
-      end
+  context "non-readable path option" do
+    let(:options) { { 'path' => "__INVALID__.js" } }
+
+    it "raises configuration error" do
+      expect { plugin.register }.to raise_error(LogStash::ConfigurationError)
+    end
+  end
+
+  context "init script" do
+    let(:options) { { 'init' => 'var foo = "bar"', 'code' => "event.setField('foo', foo)" } }
+
+    it "sets a variable in 'global' scope" do
+      plugin.register
+      plugin.multi_filter [ event ]
+      expect( event.get('foo') ).to eql 'bar'
     end
 
-    describe "init script" do
-      let(:options) { { 'init' => 'var foo = "bar"', 'code' => "event.setField('foo', foo)" } }
-
-      it "sets a variable in 'global' scope" do
-        plugin.register
-        plugin.multi_filter [ event ]
-        expect( event.get('foo') ).to eql 'bar'
-      end
-    end
-
-    describe "init parameters" do
+    context 'wtfjs' do
       let(:options) { {
-          'init_parameters' => { 'env' => 'debug', 'fieldName' => 'x', 'multiplier' => 10 },
-          'path' => "spec/fixtures/field_multiplier.js"
+          'init' => "if (Number.MIN_VALUE <= 0) throw new Error(0); if (parseInt('f*ck', 16) !== 15) throw 'f*ck'",
+          'code' => 'event.setField("message", "b" + "a" + +"a" + "a")'
       } }
 
-      it "calculates x * multiplier" do
+      it 'is still javascript' do
         plugin.register
-        event.set('x', 4.2)
         plugin.multi_filter [ event ]
-        expect( event.get('x') ).to eql 42.0
+        expect( event.get('message') ).to eql 'baNaNa'
       end
     end
-
   end
+
+  context "init parameters" do
+    let(:options) { {
+        'init_parameters' => { 'env' => 'debug', 'fieldName' => 'x', 'multiplier' => 10 },
+        'path' => "spec/fixtures/field_multiplier.js"
+    } }
+
+    it "calculates x * multiplier" do
+      plugin.register
+      event.set('x', 4.2)
+      plugin.multi_filter [ event ]
+      expect( event.get('x') ).to eql 42.0
+    end
+  end
+
 end
