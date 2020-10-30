@@ -203,7 +203,7 @@ module LogStash module Filters class Javascript < Base
 
     # @return nil if no such property
     def get(name)
-      @engine.eval(name)
+      @engine.get(name)
     end
 
     def verify
