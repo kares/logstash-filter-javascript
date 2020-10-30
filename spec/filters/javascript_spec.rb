@@ -189,6 +189,22 @@ describe LogStash::Filters::Javascript do
     end
   end
 
+  context "multiple path(s)" do
+    let(:options) { {
+        'path' => [ 'spec/fixtures/underscore.js', 'spec/fixtures/ramda.js' ],
+        'code' => 'event.setField( "last", _.last([0, 1, 2]) ); ' +
+                  'event.setField( "add", R.add(10)(1) ); '
+    } }
+    before(:each) { plugin.register }
+
+    it "executes code using _" do
+      plugin.multi_filter [ event ]
+      expect( event.get('last') ).to eql 2
+      expect( event.get('add') ).to eql 11
+    end
+
+  end
+
   context "init script" do
     let(:options) { { 'init' => 'var foo = "bar"', 'code' => "event.setField('foo', foo)" } }
 
